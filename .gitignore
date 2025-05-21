@@ -1,3 +1,6 @@
+mental_walkthrough_main_py.txt
+OpenFace_2.2.0_win_x64/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -14,7 +17,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/
 lib64/
 parts/
 sdist/

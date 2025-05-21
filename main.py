@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""Main script for extracting and analyzing facial keypoints from videos."""
-
 from pathlib import Path
 from typing import Dict
 import logging
@@ -61,7 +56,7 @@ def process_video_pipeline(
         }
 
     # Step 2: Process frames with OpenFace
-    frames_dir = Path(ffmpeg_result["output_dir"]) / "frames"
+    frames_dir = Path(ffmpeg_result["output_dir"])
     openface_result = process_with_openface(
         [str(frames_dir)],
         output_dirs=[str(output_dir / "openface")],
