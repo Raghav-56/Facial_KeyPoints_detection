@@ -1,5 +1,9 @@
-mental_walkthrough_main_py.txt
+mental_walkthrough_main_py.md
 OpenFace_2.2.0_win_x64/
+
+*.prompts.md
+
+.github/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

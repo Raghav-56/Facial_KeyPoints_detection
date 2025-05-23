@@ -6,16 +6,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import argparse
 import os
-import sys
-from scipy.signal import find_peaks
-from pathlib import Path
-
-# Add project root to path to allow importing lib modules
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-# Import the configured logger
 from config.logger_config import logger
 from lib.csv_util import read_csv_with_openface_handling
+from scipy.signal import find_peaks
 
 
 def plot_au_sum(df, threshold=0, save_path=None):
@@ -68,7 +61,7 @@ def plot_au_sum(df, threshold=0, save_path=None):
     else:
         plt.show()
 
-    return peaks.tolist() if threshold > 0 else []
+    return list(peaks) if threshold > 0 else []
 
 
 def plot_individual_aus(df, top_n=None, save_path=None):
@@ -115,7 +108,7 @@ def main():
     )
     parser.add_argument(
         "csv_file",
-        help="Path to the CSV file containing OpenFace data with AU intensity values",
+        help="Path to the CSV file with OpenFace AU intensity values",
     )
     parser.add_argument(
         "--au_sum_threshold",
@@ -127,7 +120,7 @@ def main():
         "--top_n",
         type=int,
         default=None,
-        help="Only plot the top N Action Units with highest mean intensity values",
+        help="Only plot the top N AUs with highest mean intensity values",
     )
     parser.add_argument(
         "--save_dir",
@@ -159,7 +152,9 @@ def main():
     try:
         df = read_csv_with_openface_handling(args.csv_file)
         logger.info(
-            "Loaded CSV file with %d frames and %d columns", len(df), len(df.columns)
+            "Loaded CSV file with %d frames and %d columns",
+            len(df),
+            len(df.columns),
         )
 
         # Plot individual AU signals

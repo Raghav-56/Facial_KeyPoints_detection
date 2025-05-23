@@ -9,8 +9,7 @@ def compute_au_sum(df):
     """Compute the sum of all Action Unit (AU) intensity values."""
     if "AU_sum" not in df.columns:
         au_columns = [
-            col for col in df.columns 
-            if col.startswith("AU") and col.endswith("_r")
+            col for col in df.columns if col.startswith("AU") and col.endswith("_r")
         ]
         df["AU_sum"] = df[au_columns].sum(axis=1) if au_columns else 0
         if not au_columns:
@@ -23,7 +22,7 @@ def read_csv_with_openface_handling(csv_path):
     try:
         return pd.read_csv(csv_path, comment="//")
     except pd.errors.ParserError as e:
-        logger.debug(f"Failed to parse with comment handling: {e}")
+        logger.debug("Failed to parse with comment handling: %s", e)
         return pd.read_csv(csv_path)
 
 
@@ -32,12 +31,12 @@ def extract_csv_columns(csv_file, output_csv, columns_to_extract):
     csv_path = Path(csv_file)
     df = read_csv_with_openface_handling(csv_path)
     df.columns = df.columns.str.strip()
-    
+
     available_cols = [col for col in columns_to_extract if col in df.columns]
     extracted = compute_au_sum(df[available_cols].copy())
     extracted.to_csv(output_csv, index=False)
-    logger.info(f"Extracted {len(available_cols)} columns to {output_csv}")
-    
+    logger.info("Extracted %d columns to %s", len(available_cols), output_csv)
+
     return output_csv
 
 
@@ -45,40 +44,40 @@ def smooth_signal(signal, window_length=15, polyorder=3):
     """Smooth a signal using Savitzky-Golay filter."""
     if len(signal) < 5:
         return signal
-        
+
     window_length = min(15, max(5, len(signal) // 20))
-    window_length += (window_length % 2 == 0)
+    window_length += window_length % 2 == 0
     polyorder = min(polyorder, window_length - 1)
-    
+
     try:
         pad_size = window_length // 2
         padded_signal = np.pad(signal, (pad_size, pad_size), mode="reflect")
         smoothed = savgol_filter(padded_signal, window_length, polyorder)
         return smoothed[pad_size:-pad_size]
     except Exception as e:
-        logger.warning(f"Signal smoothing failed: {e}")
+        logger.warning("Signal smoothing failed: %s", e)
         return signal
 
 
 def detect_key_frames(
-        df,
-        frame_col=None,
-        value_col="AU_sum",
-        threshold=None, 
-        method="combined",
-        min_distance=15,
-        min_peaks=3,
-        max_peaks=7,
-        adaptive=True,
-        smoothing=True,
-        percentile=95
+    df,
+    frame_col=None,
+    value_col="AU_sum",
+    threshold=None,
+    method="combined",
+    min_distance=15,
+    min_peaks=3,
+    max_peaks=7,
+    adaptive=True,
+    smoothing=True,
+    percentile=95,
 ):
     """Detect key frames using specified method."""
     # Initial setup and validation
     if value_col == "AU_sum" and value_col not in df.columns:
         df = compute_au_sum(df)
     if value_col not in df.columns:
-        logger.error(f"Column {value_col} not found in dataframe")
+        logger.error("Column %s not found in dataframe", value_col)
         return []
 
     signal = df[value_col].values
@@ -90,7 +89,7 @@ def detect_key_frames(
 
     # Signal processing
     smoothed_signal = smooth_signal(signal) if smoothing else signal
-    
+
     # Calculate threshold
     if adaptive:
         percentile_val = np.percentile(smoothed_signal, max(percentile, 97))
@@ -119,30 +118,33 @@ def detect_key_frames(
                     smoothed_signal,
                     height=actual_threshold,
                     distance=min_dist,
-                    prominence=prominence
+                    prominence=prominence,
                 )
                 key_frames = peaks.tolist()
-                logger.debug(f"Peak detection found {len(key_frames)} peaks")
+                logger.debug("Peak detection found %d peaks", len(key_frames))
             except Exception as e:
-                logger.warning(f"Peak detection failed: {e}")
+                logger.warning("Peak detection failed: %s", e)
 
     # Add threshold-based detection if needed
-    needs_threshold = (method == "threshold" or
-                      (method == "combined" and len(key_frames) < min_peaks))
-    
+    needs_threshold = method == "threshold" or (
+        method == "combined" and len(key_frames) < min_peaks
+    )
+
     if method in ["threshold", "combined"] and needs_threshold:
         high_threshold = actual_threshold * 1.1
         threshold_frames = np.where(smoothed_signal > high_threshold)[0].tolist()
-        
+
         if method == "combined" and key_frames:
             additional = [
-                tf for tf in threshold_frames
+                tf
+                for tf in threshold_frames
                 if all(abs(tf - kf) >= min_dist for kf in key_frames)
             ]
             key_frames = sorted(set(key_frames + additional))
         else:
             key_frames = [
-                tf for i, tf in enumerate(sorted(threshold_frames))
+                tf
+                for i, tf in enumerate(sorted(threshold_frames))
                 if i == 0 or abs(tf - key_frames[-1]) >= min_dist
             ]
 
@@ -159,87 +161,115 @@ def detect_key_frames(
 
     if len(key_frames) > max_peaks:
         frame_values = [(i, smoothed_signal[i]) for i in key_frames]
-        sorted_frames = sorted(frame_values, key=lambda x: x[1], reverse=True)
+        sorted_frames = sorted(frame_values, key=lambda x: float(x[1]), reverse=True)
         key_frames = sorted(i for i, _ in sorted_frames[:max_peaks])
 
     # Return results
     if frame_col in df.columns and key_frames:
         valid_frames = [
-            df.iloc[idx][frame_col] for idx in key_frames 
-            if 0 <= idx < len(df)
+            df.iloc[idx][frame_col] for idx in key_frames if 0 <= idx < len(df)
         ]
-        logger.info(f"Detected {len(valid_frames)} key frames using {method} method")
+        logger.info("Detected %d key frames using %s method", len(valid_frames), method)
         return valid_frames
-    
-    logger.info(f"Detected {len(key_frames)} key frames using {method} method")
+
+    logger.info("Detected %d key frames using %s method", len(key_frames), method)
     return sorted(key_frames)
 
 
 def create_key_frames_csv(
-        input_csv_path,
-        output_csv_path=None,
-        key_frames=None,
-        frame_col="frame",
-        value_col="AU_sum",
-        method="combined",
-        min_distance=15,
-        min_peaks=3,
-        max_peaks=7,
-        adaptive=True,
-        smoothing=True,
-        percentile=95
+    input_csv_path,
+    output_csv_path=None,
+    key_frames=None,
+    frame_col="frame",
+    value_col="AU_sum",
+    method="combined",
+    min_distance=15,
+    min_peaks=3,
+    max_peaks=7,
+    adaptive=True,
+    smoothing=True,
+    percentile=95,
 ):
     """Create a CSV file containing only the data from key frames."""
     input_path = Path(input_csv_path)
     if output_csv_path is None:
         suffix = "_keyframes" + input_path.suffix
         output_csv_path = input_path.parent / f"{input_path.stem}{suffix}"
-    
-    logger.info(f"Processing {input_path}")
+
+    logger.info("Processing %s", input_path)
     df = read_csv_with_openface_handling(input_path)
     if value_col == "AU_sum" and value_col not in df.columns:
         df = compute_au_sum(df)
-    
+
     if key_frames is None:
         key_frames = detect_key_frames(
-            df, frame_col=frame_col, value_col=value_col,
-            method=method, min_distance=min_distance,
-            min_peaks=min_peaks, max_peaks=max_peaks,
-            adaptive=adaptive, smoothing=smoothing,
-            percentile=percentile
+            df,
+            frame_col=frame_col,
+            value_col=value_col,
+            method=method,
+            min_distance=min_distance,
+            min_peaks=min_peaks,
+            max_peaks=max_peaks,
+            adaptive=adaptive,
+            smoothing=smoothing,
+            percentile=percentile,
         )
-    
+
     if frame_col in df.columns:
-        key_frames_df = (df[df[frame_col].isin(key_frames)]
-                        .sort_values(by=frame_col))
+        key_df = df[df[frame_col].isin(key_frames)].sort_values(by=frame_col)
     else:
-        key_frames_df = df.iloc[key_frames]
-    
-    try:
-        key_frames_df.to_csv(output_csv_path, index=False)
-        logger.info(f"Saved {len(key_frames)} frames to {output_csv_path}")
-    except Exception as e:
-        logger.error(f"Failed to save key frames CSV: {e}")
-        raise
-    
-    return output_csv_path, key_frames
+        key_df = df.iloc[key_frames]
+
+    key_df.to_csv(output_csv_path, index=False)
+    logger.info("Saved key frames to %s", output_csv_path)
+    return str(output_csv_path)
 
 
 # Default columns to extract from OpenFace CSV output
 OPENFACE_INTENSITY_COLS = [
-    "AU01_r", "AU02_r", "AU04_r", "AU05_r", "AU06_r", "AU07_r", "AU09_r",
-    "AU10_r", "AU12_r", "AU14_r", "AU15_r", "AU17_r", "AU20_r", "AU23_r",
-    "AU25_r", "AU26_r", "AU45_r"
+    "AU01_r",
+    "AU02_r",
+    "AU04_r",
+    "AU05_r",
+    "AU06_r",
+    "AU07_r",
+    "AU09_r",
+    "AU10_r",
+    "AU12_r",
+    "AU14_r",
+    "AU15_r",
+    "AU17_r",
+    "AU20_r",
+    "AU23_r",
+    "AU25_r",
+    "AU26_r",
+    "AU45_r",
 ]
 
 OPENFACE_PRESENCE_COLS = [
-    "AU01_c", "AU02_c", "AU04_c", "AU05_c", "AU06_c", "AU07_c", "AU09_c",
-    "AU10_c", "AU12_c", "AU14_c", "AU15_c", "AU17_c", "AU20_c", "AU23_c",
-    "AU25_c", "AU26_c", "AU28_c", "AU45_c"
+    "AU01_c",
+    "AU02_c",
+    "AU04_c",
+    "AU05_c",
+    "AU06_c",
+    "AU07_c",
+    "AU09_c",
+    "AU10_c",
+    "AU12_c",
+    "AU14_c",
+    "AU15_c",
+    "AU17_c",
+    "AU20_c",
+    "AU23_c",
+    "AU25_c",
+    "AU26_c",
+    "AU28_c",
+    "AU45_c",
 ]
 
-COLUMNS_TO_EXTRACT = ["frame", "timestamp"] + OPENFACE_INTENSITY_COLS + OPENFACE_PRESENCE_COLS
-
+COLUMNS_TO_EXTRACT = (
+    ["frame", "timestamp"] + OPENFACE_INTENSITY_COLS + OPENFACE_PRESENCE_COLS
+)
 
 
 """ COLUMNS_TO_EXTRACT = [

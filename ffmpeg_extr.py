@@ -28,9 +28,11 @@ from lib.extract_i_frames import build_extract_frames_command
 
 logger = logger("video_processor", "logs")
 
+
 @dataclass
 class Config:
     """Configuration for frame extraction from videos."""
+
     input_path: Path = DEFAULT_INPUT_ROOT
     output_root: Optional[Path] = DEFAULT_OUTPUT_ROOT
     ffmpeg_path: Path = DEFAULT_FFMPEG_PATH
@@ -49,7 +51,9 @@ class Config:
 class VideoProcessor:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.data_handler = DataHandler(log_file=cfg.log_file, metadata_csv=cfg.metadata_csv)
+        self.data_handler = DataHandler(
+            log_file=cfg.log_file, metadata_csv=cfg.metadata_csv
+        )
 
     def process_video(self, video_path: Path) -> Dict:
         """Extract I-frames from video file."""
@@ -65,14 +69,15 @@ class VideoProcessor:
         try:
             cmd = build_extract_frames_command(self.cfg, video_path, output_dir)
             subprocess.run(cmd, capture_output=True, check=True)
-            
+
             return {
                 "video_path": str(video_path),
                 "status": "success",
                 "metadata": metadata,
+                "output_dir": str(output_dir),
                 "frame_count": self.data_handler.count_extracted_frames(
                     output_dir, self.cfg.output_format
-                )
+                ),
             }
         except Exception as e:
             logger.error(f"Failed to process {video_path.name}: {str(e)}")

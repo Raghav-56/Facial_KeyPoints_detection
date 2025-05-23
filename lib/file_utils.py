@@ -7,15 +7,11 @@ def safe_mkdir(directory: str | Path) -> Path:
     try:
         directory_path.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise OSError(
-            f"Failed to create directory {directory_path}: {e}"
-        ) from e
+        raise OSError(f"Failed to create directory {directory_path}: {e}") from e
     return directory_path
 
 
-def get_file_list(
-    directory: str | Path, valid_extensions: list[str]
-) -> list[str]:
+def get_file_list(directory: str | Path, valid_extensions: list[str]) -> list[str]:
     directory_path = Path(directory)
     if not directory_path.is_dir():
         raise FileNotFoundError(
@@ -46,13 +42,9 @@ def copy_with_structure(
     dst_root_path = Path(dst_root).resolve()
 
     if not src_path.is_file():
-        raise FileNotFoundError(
-            f"Source file not found or is not a file: {src_file}"
-        )
+        raise FileNotFoundError(f"Source file not found or is not a file: {src_file}")
     if not src_root_path.is_dir():
-        raise NotADirectoryError(
-            f"Source root is not a directory: {src_root}"
-        )
+        raise NotADirectoryError(f"Source root is not a directory: {src_root}")
 
     try:
         rel_path = src_path.parent.relative_to(src_root_path)

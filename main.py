@@ -1,7 +1,5 @@
 from pathlib import Path
 from typing import Dict
-import logging
-
 from config.defaults import (
     DEFAULT_THREADS,
     DEFAULT_QUALITY,
@@ -14,15 +12,14 @@ from config.defaults import (
 )
 from config.config import get_config
 from config.logger_config import logger
-
 from ffmpeg_extr import (
     Config as FFmpegConfig,
     VideoProcessor as FFmpegProcessor,
 )
 from openFace_prs import process_videos as process_with_openface
+from lib.face_extraction import extract_faces_from_video_processing
 
 
-# List of supported video formats
 VALID_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov"}
 
 
@@ -48,7 +45,7 @@ def process_video_pipeline(
     ffmpeg_result = ffmpeg_processor.process_video(video_path)
 
     if not ffmpeg_result.get("status") == "success":
-        logger.error(f"Failed to extract frames from {video_path}")
+        logger.error("Failed to extract frames from %s", video_path)
         return {
             "success": False,
             "video": str(video_path),
@@ -63,11 +60,48 @@ def process_video_pipeline(
         config=openface_config,
     )
 
+    # Check if OpenFace processing was successful
+    if not openface_result or not openface_result[0].get("success"):
+        logger.error("OpenFace processing failed for %s", video_path)
+        return {
+            "success": False,
+            "video": str(video_path),
+            "error": "OpenFace processing failed",
+            "ffmpeg_result": ffmpeg_result,
+        }
+
+    # Step 3: Extract face crops using OpenFace landmarks
+    openface_csv = openface_result[0].get("csv_file")
+    if openface_csv and Path(openface_csv).exists():
+        face_extraction_result = extract_faces_from_video_processing(
+            frames_dir=frames_dir,
+            openface_csv=Path(openface_csv),
+            output_dir=output_dir / "face_extraction",
+            target_size=(224, 224),
+            frame_format=ffmpeg_config.output_format,
+        )
+
+        if face_extraction_result.get("success"):
+            logger.info("Successfully extracted faces for %s", video_path)
+        else:
+            logger.warning(
+                "Face extraction failed for %s: %s",
+                video_path,
+                face_extraction_result.get("error", "Unknown error"),
+            )
+    else:
+        logger.warning("No OpenFace CSV found for face extraction: %s", openface_csv)
+        face_extraction_result = {
+            "success": False,
+            "error": "No OpenFace CSV available",
+        }
+
     return {
         "success": True,
         "video": str(video_path),
         "ffmpeg_result": ffmpeg_result,
         "openface_result": openface_result[0] if openface_result else None,
+        "face_extraction_result": face_extraction_result,
         "output_dir": str(output_dir),
     }
 
@@ -128,9 +162,9 @@ def main() -> None:
             openface_config,
         )
         if result["success"]:
-            logger.info(f"Successfully processed {input_path}")
+            logger.info("Successfully processed %s", input_path)
         else:
-            logger.error(f"Failed to process {input_path}")
+            logger.error("Failed to process %s", input_path)
 
     else:
         # Process all videos in directory
@@ -151,8 +185,10 @@ def main() -> None:
         successful = sum(1 for r in results if r["success"])
         failed = len(results) - successful
         logger.info(
-            f"Processed {len(results)} videos. "
-            f"Success: {successful}, Failed: {failed}"
+            "Processed %d videos. Success: %d, Failed: %d",
+            len(results),
+            successful,
+            failed,
         )
 
 
