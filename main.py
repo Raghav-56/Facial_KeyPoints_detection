@@ -29,17 +29,10 @@ def process_video_pipeline(
     ffmpeg_config: FFmpegConfig,
     openface_config: Dict,
 ) -> Dict:
-    """Process a single video through the complete pipeline.
+    """Process a single video through the complete pipeline."""
 
-    Args:
-        video_path: Path to the input video file
-        output_dir: Directory to store the output
-        ffmpeg_config: Configuration for FFmpeg extraction
-        openface_config: Configuration for OpenFace processing
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    Returns:
-        Dict containing the processing results
-    """
     # Step 1: Extract I-frames with FFmpeg
     ffmpeg_processor = FFmpegProcessor(ffmpeg_config)
     ffmpeg_result = ffmpeg_processor.process_video(video_path)
@@ -52,15 +45,17 @@ def process_video_pipeline(
             "error": "FFmpeg extraction failed",
         }
 
-    # Step 2: Process frames with OpenFace
-    frames_dir = Path(ffmpeg_result["output_dir"])
+    # Step 2: Process original video with OpenFace (not frames)
+    openface_output_dir = output_dir / "openface"
+    openface_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Process the original video file with OpenFace
     openface_result = process_with_openface(
-        [str(frames_dir)],
-        output_dirs=[str(output_dir / "openface")],
+        [str(video_path)],  # Pass video file, not frames directory
+        output_dirs=[str(openface_output_dir)],
         config=openface_config,
     )
 
-    # Check if OpenFace processing was successful
     if not openface_result or not openface_result[0].get("success"):
         logger.error("OpenFace processing failed for %s", video_path)
         return {
@@ -70,13 +65,19 @@ def process_video_pipeline(
             "ffmpeg_result": ffmpeg_result,
         }
 
-    # Step 3: Extract face crops using OpenFace landmarks
+    # Step 3: Extract face crops using OpenFace landmarks and FFmpeg frames
     openface_csv = openface_result[0].get("csv_file")
+    face_extraction_result = {"success": False, "error": "No CSV file"}
+
     if openface_csv and Path(openface_csv).exists():
+        frames_dir = Path(ffmpeg_result["output_dir"])
+        face_extraction_dir = output_dir / "face_extraction"
+        face_extraction_dir.mkdir(parents=True, exist_ok=True)
+
         face_extraction_result = extract_faces_from_video_processing(
             frames_dir=frames_dir,
             openface_csv=Path(openface_csv),
-            output_dir=output_dir / "face_extraction",
+            output_dir=face_extraction_dir,
             target_size=(224, 224),
             frame_format=ffmpeg_config.output_format,
         )
@@ -90,11 +91,9 @@ def process_video_pipeline(
                 face_extraction_result.get("error", "Unknown error"),
             )
     else:
-        logger.warning("No OpenFace CSV found for face extraction: %s", openface_csv)
-        face_extraction_result = {
-            "success": False,
-            "error": "No OpenFace CSV available",
-        }
+        logger.warning(
+            "No OpenFace CSV found for face extraction: %s", openface_csv
+        )
 
     return {
         "success": True,
@@ -134,10 +133,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    input_path = Path(args.input) if args.input else DEFAULT_INPUT_ROOT
+    output_root = Path(args.output) if args.output else DEFAULT_OUTPUT_ROOT
+
+    # Validate input path
+    if not input_path.exists():
+        logger.error("Input path does not exist: %s", input_path)
+        return
+
+    # Ensure output directory exists
+    output_root.mkdir(parents=True, exist_ok=True)
+
     # Configure FFmpeg
     ffmpeg_config = FFmpegConfig(
-        input_path=Path(args.input) if args.input else DEFAULT_INPUT_ROOT,
-        output_root=Path(args.output) if args.output else DEFAULT_OUTPUT_ROOT,
+        input_path=input_path,
+        output_root=output_root,
         ffmpeg_path=DEFAULT_FFMPEG_PATH,
         threads=args.threads,
         frame_pattern=DEFAULT_FRAME_PATTERN,
@@ -150,36 +160,50 @@ def main() -> None:
     # Get OpenFace configuration
     openface_config = get_config()
 
-    input_path = Path(args.input) if args.input else DEFAULT_INPUT_ROOT
-    output_root = Path(args.output) if args.output else DEFAULT_OUTPUT_ROOT
-
     if input_path.is_file():
         # Process single video
+        if input_path.suffix.lower() not in VALID_VIDEO_EXTENSIONS:
+            logger.error("Invalid video file extension: %s", input_path.suffix)
+            return
+
+        output_dir = output_root / input_path.stem
         result = process_video_pipeline(
             input_path,
-            output_root,
+            output_dir,
             ffmpeg_config,
             openface_config,
         )
         if result["success"]:
             logger.info("Successfully processed %s", input_path)
         else:
-            logger.error("Failed to process %s", input_path)
+            logger.error(
+                "Failed to process %s: %s", input_path, result.get("error")
+            )
 
     else:
         # Process all videos in directory
+        video_files = list(input_path.rglob("*"))
+        video_files = [
+            f
+            for f in video_files
+            if f.suffix.lower() in VALID_VIDEO_EXTENSIONS
+        ]
+
+        if not video_files:
+            logger.warning("No valid video files found in %s", input_path)
+            return
+
         results = []
-        for video_path in input_path.rglob("*"):
-            if video_path.suffix.lower() in VALID_VIDEO_EXTENSIONS:
-                rel_path = video_path.relative_to(input_path)
-                output_dir = output_root / rel_path.parent / video_path.stem
-                result = process_video_pipeline(
-                    video_path,
-                    output_dir,
-                    ffmpeg_config,
-                    openface_config,
-                )
-                results.append(result)
+        for video_path in video_files:
+            rel_path = video_path.relative_to(input_path)
+            output_dir = output_root / rel_path.parent / video_path.stem
+            result = process_video_pipeline(
+                video_path,
+                output_dir,
+                ffmpeg_config,
+                openface_config,
+            )
+            results.append(result)
 
         # Report results
         successful = sum(1 for r in results if r["success"])
